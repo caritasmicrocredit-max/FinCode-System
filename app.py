@@ -114,7 +114,7 @@ elif page == "➕ تقديم طلب / اقتراح":
                     st.error("❌ حدث خطأ أثناء إرسال الطلب، يرجى المحاولة مرة أخرى.")
 
 # ----------------------------------------
-# الصفحة الثالثة: لوحة تحكم الأدمن التلقائية والمستقرة
+# الصفحة الثالثة: لوحة تحكم الأدمن التلقائية والمستقرة والمحمية
 # ----------------------------------------
 elif page == "🔐 لوحة تحكم الأدمن":
     st.title("🔐 إدارة النظام والموافقات والأكواد")
@@ -146,19 +146,24 @@ elif page == "🔐 لوحة تحكم الأدمن":
         if not pending_list:
             st.info("لا توجد طلبات معلقة حالياً في قاعدة البيانات.")
         else:
-            for req in pending_list:
-                with st.expander(f"📋 طلب من: {req['user_name']} | نوع الطلب: {req['req_type']}", expanded=True):
-                    st.write(f"**رقم الهاتف:** {req['user_phone']}")
-                    if req['code_affected']:
+            # استخدام enumerate لضمان وجود مؤشر عددي فريد (idx) يمنع خطأ StreamlitAPIException تماماً
+            for idx, req in enumerate(pending_list):
+                # تأمين الحصول على معرف حتى لو كان فارغاً في قاعدة البيانات
+                req_id = req.get('id', idx)
+                req_code = req.get('code_affected', 'NO_CODE') or f'custom_{idx}'
+                
+                with st.expander(f"📋 طلب من: {req.get('user_name', 'مجهول')} | نوع الطلب: {req.get('req_type', 'عام')}", expanded=True):
+                    st.write(f"**رقم الهاتف:** {req.get('user_phone', 'غير مسجل')}")
+                    if req.get('code_affected'):
                         st.write(f"**الكود المعني:** `{req['code_affected']}`")
-                    st.write(f"**البيان / الاسم المقترح:** {req['details']}")
+                    st.write(f"**البيان / الاسم المقترح:** {req.get('details', '')}")
                     
                     c1, c2, _ = st.columns([1, 1, 4])
                     with c1:
-                        if st.button("✅ موافقة وتحديث الأكواد المعتمدة", key=f"app_{req['id']}"):
+                        # دمج الـ ID مع الـ Index لضمان مفتاح فريد 100%
+                        if st.button("✅ موافقة وتحديث الأكواد", key=f"app_{req_id}_{req_code}_{idx}"):
                             
-                            # إذا كان الطلب إضافة أو تعديل، نقوم بعملية Upsert مباشرة على جدولك الاحترافي entities
-                            if req['req_type'] in ["إضافة كود جديد", "تعديل اسم كود الحالي"] and req['code_affected']:
+                            if req.get('req_type') in ["إضافة كود جديد", "تعديل اسم كود الحالي"] and req.get('code_affected'):
                                 # تحديد الفئة التقريبية للكود الجديد لتصنيفه بجدولك تلقائياً
                                 code_prefix = req['code_affected'][:2].upper()
                                 category_map = {"CB": "بنوك", "FB": "بنوك", "IB": "بنوك", "MF": "تمويل متناهي الصغر", "LF": "تأجير تمويلي", "FS": "تخصيم", "MG": "تمويل عقاري وإسكان", "HS": "تمويل عقاري وإسكان", "RC": "تمويل استهلاكي / شركات تجارية"}
@@ -172,14 +177,15 @@ elif page == "🔐 لوحة تحكم الأدمن":
                                 }, on_conflict="code").execute()
                             
                             # حذف الطلب المقترح بعد اعتماده بنجاح
-                            supabase.table("entity_suggestions").delete().eq("id", req["id"]).execute()
-                            st.toast("✅ تم اعتماد الكود بنجاح وحذفه من قائمة الانتظار!")
+                            supabase.table("entity_suggestions").delete().eq("id", req_id).execute()
+                            st.toast("✅ تم اعتماد الكود بنجاح!")
                             st.rerun()
                             
                     with c2:
-                        if st.button("❌ رفض وحذف الاقتراح", key=f"rej_{req['id']}", type="danger"):
+                        # دمج الـ ID مع الـ Index لضمان مفتاح فريد 100% لزر الرفض
+                        if st.button("❌ رفض وحذف الاقتراح", key=f"rej_{req_id}_{req_code}_{idx}", type="danger"):
                             # حذف الطلب مباشرة من جدول المقترحات
-                            supabase.table("entity_suggestions").delete().eq("id", req["id"]).execute()
+                            supabase.table("entity_suggestions").delete().eq("id", req_id).execute()
                             st.toast("❌ تم رفض الطلب وحذفه.")
                             st.rerun()
                             
