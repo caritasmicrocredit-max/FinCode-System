@@ -119,10 +119,11 @@ elif page == "➕ تقديم طلب / اقتراح":
 elif page == "🔐 لوحة تحكم الأدمن":
     st.title("🔐 إدارة النظام والموافقات والأكواد")
     
-    # التحقق من حالة الدخول السابقة أو استقبال كلمة مرور جديدة
-    if not st.sidebar.get("admin_logged_in", False) and "admin_logged_in" not in st.session_state:
+    # تهيئة حالة تسجيل الدخول في الذاكرة بشكل صحيح إذا لم تكن موجودة مسبقاً
+    if "admin_logged_in" not in st.session_state:
         st.session_state["admin_logged_in"] = False
 
+    # إذا لم يكن الأدمن مسجلاً دخوله، نعرض حقل كلمة المرور
     if not st.session_state["admin_logged_in"]:
         admin_password = st.sidebar.text_input("أدخل كلمة مرور الأدمن", type="password")
         if admin_password == "admin123": # يمكنك تعديل الباسورد هنا
@@ -131,7 +132,7 @@ elif page == "🔐 لوحة تحكم الأدمن":
         elif admin_password != "":
             st.sidebar.error("❌ كلمة المرور خاطئة!")
     
-    # عرض اللوحة فقط إذا كان الأدمن مسجل الدخول في الذاكرة
+    # عرض اللوحة فقط إذا كان الأدمن مسجل الدخول بنجاح في الذاكرة
     if st.session_state["admin_logged_in"]:
         st.success("🔓 مرحباً بك يا أدمن. متصل بقاعدة البيانات بشكل كامل وصلاحيات الإدراج مفعلة.")
         
@@ -171,7 +172,7 @@ elif page == "🔐 لوحة تحكم الأدمن":
                             "is_active": True
                         }, on_conflict="code").execute()
                     
-                    # حذف الطلب من جدول الاقتراحات
+                    # حذف الطلب من جدول الاقتراحات بعد اعتماده
                     supabase.table("entity_suggestions").delete().eq("id", record_id).execute()
                 except Exception as e:
                     pass
@@ -183,7 +184,7 @@ elif page == "🔐 لوحة تحكم الأدمن":
                 except Exception as e:
                     pass
 
-            # عرض الطلبات باستخدام حلقة تكرارية آمنة تعتمد على الطابع الزمني والـ UUID المطور للـ Keys
+            # عرض الطلبات باستخدام حلقة تكرارية آمنة تعتمد على الـ Callbacks والـ Keys الفريدة
             for idx, req in enumerate(pending_list):
                 # تأمين تصنيع معرف فريد جداً ومستحيل التكرار في الذاكرة لكل عنصر واجهة
                 req_id = req.get('id', idx)
