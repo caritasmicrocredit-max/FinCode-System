@@ -114,12 +114,15 @@ elif page == "➕ تقديم طلب / اقتراح":
                     st.error("❌ حدث خطأ أثناء إرسال الطلب، يرجى المحاولة مرة أخرى.")
 
 # ----------------------------------------
-# الصفحة الثالثة: لوحة تحكم الأدمن التلقائية المستقرة والمحمية تماماً ضد التداخل
+# الصفحة الثالثة: لوحة تحكم الأدمن التلقائية المستقرة والمحمية بنظام الـ Callbacks
 # ----------------------------------------
 elif page == "🔐 لوحة تحكم الأدمن":
     st.title("🔐 إدارة النظام والموافقات والأكواد")
     
     # التحقق من حالة الدخول السابقة أو استقبال كلمة مرور جديدة
+    if not st.sidebar.get("admin_logged_in", False) and "admin_logged_in" not in st.session_state:
+        st.session_state["admin_logged_in"] = False
+
     if not st.session_state["admin_logged_in"]:
         admin_password = st.sidebar.text_input("أدخل كلمة مرور الأدمن", type="password")
         if admin_password == "admin123": # يمكنك تعديل الباسورد هنا
@@ -146,12 +149,47 @@ elif page == "🔐 لوحة تحكم الأدمن":
         if not pending_list:
             st.info("لا توجد طلبات معلقة حالياً في قاعدة البيانات.")
         else:
-            # استخدام enumerate لضمان وجود مؤشر عددي فريد
+            # دالة مستقلة للموافقة والاعتماد (تم نقلها خارج الواجهة لضمان الاستقرار)
+            def approve_request(req_data, record_id):
+                try:
+                    if req_data.get('req_type') in ["إضافة كود جديد", "تعديل اسم كود الحالي"] and req_data.get('code_affected'):
+                        # تحديد الفئة التقريبية للكود الجديد لتصنيفه تلقائياً
+                        code_prefix = str(req_data['code_affected'])[:2].upper()
+                        category_map = {
+                            "CB": "بنوك", "FB": "بنوك", "IB": "بنوك", 
+                            "MF": "تمويل متناهي الصغر", "LF": "تأجير تمويلي", 
+                            "FS": "تخصيم", "MG": "تمويل عقاري وإسكان", 
+                            "HS": "تمويل عقاري وإسكان", "RC": "تمويل استهلاكي / شركات تجارية"
+                        }
+                        determined_cat = category_map.get(code_prefix, "أخرى")
+
+                        # تحديث البيانات في جدول الأكواد الرئيسي
+                        supabase.table("entities").upsert({
+                            "code": req_data['code_affected'].strip(),
+                            "name": req_data['details'].strip(),
+                            "category": determined_cat,
+                            "is_active": True
+                        }, on_conflict="code").execute()
+                    
+                    # حذف الطلب من جدول الاقتراحات
+                    supabase.table("entity_suggestions").delete().eq("id", record_id).execute()
+                except Exception as e:
+                    pass
+
+            # دالة مستقلة للرفض والحذف
+            def reject_request(record_id):
+                try:
+                    supabase.table("entity_suggestions").delete().eq("id", record_id).execute()
+                except Exception as e:
+                    pass
+
+            # عرض الطلبات باستخدام حلقة تكرارية آمنة تعتمد على الطابع الزمني والـ UUID المطور للـ Keys
             for idx, req in enumerate(pending_list):
+                # تأمين تصنيع معرف فريد جداً ومستحيل التكرار في الذاكرة لكل عنصر واجهة
                 req_id = req.get('id', idx)
-                req_code = req.get('code_affected', 'NO_CODE') or f'none_{idx}'
+                unique_key_suffix = f"__id_{req_id}__idx_{idx}__code_{req.get('code_affected', 'none')}"
                 
-                # إنشاء حاوية صندوق (Container) منفصلة تماماً لكل طلب لعزل الأزرار في الذاكرة
+                # إنشاء صندوق حاوية منفصل معزول برمجياً تماماً
                 with st.container(border=True):
                     st.markdown(f"### 📋 طلب من: **{req.get('user_name', 'مجهول')}**")
                     st.write(f"**نوع الطلب:** {req.get('req_type', 'عام')}")
@@ -162,45 +200,24 @@ elif page == "🔐 لوحة تحكم الأدمن":
                         
                     st.info(f"**البيان / الاسم المقترح:** {req.get('details', '')}")
                     
-                    # وضع الأزرار داخل استمارة مصغرة (Form) يمنع Streamlit من عمل Rerun عشوائي متداخل
-                    with st.form(key=f"form_admin_{req_id}_{idx}"):
-                        c1, c2, _ = st.columns([1, 1, 3])
-                        with c1:
-                            btn_approve = st.form_submit_button("✅ موافقة واعتماد")
-                        with c2:
-                            btn_reject = st.form_submit_button("❌ رفض وحذف", type="danger")
-                            
-                        # تنفيذ العمليات بناءً على الزر المضغوط داخل الـ Form الآمن
-                        if btn_approve:
-                            if req.get('req_type') in ["إضافة كود جديد", "تعديل اسم كود الحالي"] and req.get('code_affected'):
-                                # تحديد الفئة التقريبية للكود الجديد لتصنيفه تلقائياً
-                                code_prefix = str(req['code_affected'])[:2].upper()
-                                category_map = {
-                                    "CB": "بنوك", "FB": "بنوك", "IB": "بنوك", 
-                                    "MF": "تمويل متناهي الصغر", "LF": "تأجير تمويلي", 
-                                    "FS": "تخصيم", "MG": "تمويل عقاري وإسكان", 
-                                    "HS": "تمويل عقاري وإسكان", "RC": "تمويل استهلاكي / شركات تجارية"
-                                }
-                                determined_cat = category_map.get(code_prefix, "أخرى")
-
-                                # تحديث البيانات في جدول الأكواد الرئيسي
-                                supabase.table("entities").upsert({
-                                    "code": req['code_affected'].strip(),
-                                    "name": req['details'].strip(),
-                                    "category": determined_cat,
-                                    "is_active": True
-                                }, on_conflict="code").execute()
-                            
-                            # حذف الطلب من جدول الاقتراحات
-                            supabase.table("entity_suggestions").delete().eq("id", req_id).execute()
-                            # إعادة تحديث الصفحة بشكل نظيف ومستقر بدون تداخل
-                            st.rerun()
-                            
-                        if btn_reject:
-                            # حذف الطلب مباشرة عند الرفض
-                            supabase.table("entity_suggestions").delete().eq("id", req_id).execute()
-                            # إعادة تحديث الصفحة بشكل نظيف ومستقر بدون تداخل
-                            st.rerun()
+                    # إنشاء الأزرار بشكل مباشر مع ربطها بالـ Callbacks وتمرير المعطيات كـ args
+                    c1, c2, _ = st.columns([1, 1, 3])
+                    with c1:
+                        st.button(
+                            "✅ موافقة واعتماد", 
+                            key=f"btn_approve_{unique_key_suffix}", 
+                            type="primary",
+                            on_click=approve_request,
+                            args=(req, req_id)
+                        )
+                    with c2:
+                        st.button(
+                            "❌ رفض وحذف", 
+                            key=f"btn_reject_{unique_key_suffix}", 
+                            type="danger",
+                            on_click=reject_request,
+                            args=(req_id,)
+                        )
                             
         st.divider()
         st.subheader("📊 معاينة سريعة لآخر 5 جهات تم تحديثها في جدولك الفعلي (entities):")
