@@ -1,92 +1,77 @@
 import streamlit as st
 import pandas as pd
+import re
+from supabase import create_client
 
 # إعدادات الصفحة
-st.set_page_config(page_title="منظومة أكواد جهات التمويل", page_icon="🔎", layout="wide")
+st.set_page_config(page_title="منظومة مُعرّف لأكواد التمويل", page_icon="🔎", layout="wide")
 
-# 1. محاكاة قاعدة البيانات باستخدام Session State (حتى لا تضيع البيانات أثناء التنقل بين الصفحات)
-if "approved_codes" not in st.session_state:
-    st.session_state.approved_codes = {
-        "MF00171007": "شركة أبو ظبي الإسلامي للتمويل متناهي الصغر - أرزاق",
-        "CB01280001": "المصرف المتحد",
-        "CB13000001": "البنك التجاري الدولي مصر",
-        "CB14000001": "بنك بلوم - مصر",
-        "CB15000001": "بنك الامارات دبى الوطنى",
-        "CB17000001": "بنك قناة السويس",
-        "CB19000001": "بنك ابوظبى الاول مصر",
-        "CB20000001": "البنك الاهلي المتحد",
-        "CB23000001": "بنك فيصل الاسلامى المصرى"
-    }
-
-if "pending_requests" not in st.session_state:
-    st.session_state.pending_requests = [
-        {
-            "id": 0,
-            "name": "أحمد علي",
-            "phone": "01012345678",
-            "type": "إضافة كود جديد",
-            "code": "PC04000001",
-            "details": "بنك مصــــر"
-        }
-    ]
+# ===================== اتصال Supabase =====================
+URL = st.secrets["SUPABASE_URL"]
+KEY = st.secrets["SUPABASE_KEY"]
+supabase = create_client(URL, KEY)
 
 # القائمة الجانبية للتنقل
 st.sidebar.title("🧭 القائمة الرئيسية")
 page = st.sidebar.radio("انتقل إلى:", ["🔎 البحث والاستبدال", "➕ تقديم طلب / اقتراح", "🔐 لوحة تحكم الأدمن"])
 
 # ----------------------------------------
-# الصفحة الأولى: البحث والاستبدال
+# الصفحة الأولى: البحث والاستبدال (تعتمد على جدول entities)
 # ----------------------------------------
 if page == "🔎 البحث والاستبدال":
     st.title("🔎 برنامج البحث والاستبدال للأكواد جهات التمويل")
-    st.write("مرحباً بك! يمكنك البحث عن جهة تمويل أو استبدال مجموعة أكواد بالأسماء دفعة واحدة.")
+    st.write("مرحباً بك! يمكنك البحث السريع أو الاستبدال الجماعي للأكواد مباشرة من قاعدة البيانات المعتمدة.")
     
     tab1, tab2 = st.tabs(["🔄 استبدال جماعي للأكواد", "🔍 بحث سريع عن جهة"])
     
     with tab1:
-        st.subheader("إدخل الأكواد (مفصولة بأسطر أو فواصل):")
-        codes_input = st.text_area("الأكواد المدخلة", placeholder="مثال:\nCB01280001\nMF00171007", height=150)
+        st.subheader("أدخل الأكواد (مفصولة بأسطر أو فواصل):")
+        codes_input = st.text_area("الأكواد المدخلة", placeholder="مثال:\nCB13000001\nMF00171007", height=150)
         
         if st.button("🔄 استبدال بالأسماء", type="primary"):
             if codes_input.strip():
-                # تقسيم المدخلات بناء على الأسطر أو الفواصل
-                import re
-                lines = re.split(r'[\s,،\n]+', codes_input.strip())
-                results = []
-                for code in lines:
-                    if code:
-                        name = st.session_state.approved_codes.get(code, "❌ غير موجود في قاعدة البيانات")
-                        results.append(f"{code} ➝ {name}")
+                # تقسيم المدخلات بناء على الأسطر أو الفواصل وتنظيفها
+                input_codes = [c.strip() for c in re.split(r'[\s,،\n]+', codes_input.strip()) if c.strip()]
                 
-                st.subheader("📋 النتائج:")
-                output_text = "\n".join(results)
-                st.code(output_text, language="text")
+                if input_codes:
+                    # جلب الأكواد من جدولك الفعلي entities (فقط الحسابات النشطة)
+                    response = supabase.table("entities").select("code, name").in_("code", input_codes).eq("is_active", True).execute()
+                    db_map = {row['code']: row['name'] for row in response.data}
+                    
+                    results = []
+                    for code in input_codes:
+                        name = db_map.get(code, "❌ غير موجود في قاعدة البيانات أو غير نشط")
+                        results.append(f"{code} ➝ {name}")
+                    
+                    st.subheader("📋 النتائج:")
+                    st.code("\n".join(results), language="text")
             else:
                 st.warning("من فضلك أدخل أكواد أولاً.")
                 
     with tab2:
         st.subheader("البحث الذكي:")
-        search_query = st.text_input("أدخل جزءاً من الكود أو اسم الجهة...")
+        search_query = st.text_input("أدخل جزءاً من الكود، اسم الجهة، أو التصنيف...")
         
         if search_query:
-            found_results = []
-            for code, name in st.session_state.approved_codes.items():
-                if search_query.lower() in code.lower() or search_query in name:
-                    found_results.append({"الكود": code, "اسم الجهة التمويلية": name})
+            # البحث الذكي في الكود أو الاسم أو الـ Category داخل جدول entities
+            response = supabase.table("entities").select("code, name, category, sub_category, is_active").or_(
+                f"code.ilike.%{search_query}%,name.ilike.%{search_query}%,category.ilike.%{search_query}%"
+            ).execute()
             
-            if found_results:
-                st.success(f"تم العثور على {len(found_results)} نتيجة:")
-                df = pd.DataFrame(found_results)
+            if response.data:
+                st.success(f"تم العثور على {len(response.data)} نتيجة:")
+                df = pd.DataFrame(response.data)
+                df.columns = ["الكود", "اسم الجهة التمويلية", "التصنيف الرئيسي", "التصنيف الفرعي", "حالة النشاط"]
                 st.dataframe(df, use_container_width=True)
             else:
                 st.error("❌ لا توجد نتائج مطابقة لبحثك.")
 
 # ----------------------------------------
-# الصفحة الثانية: تقديم طلب أو اقتراح
+# الصفحة الثانية: تقديم طلب أو اقتراح (تعتمد على جدول entity_suggestions)
 # ----------------------------------------
 elif page == "➕ تقديم طلب / اقتراح":
     st.title("➕ نموذج طلب إضافة / تعديل أو تقديم اقتراح")
-    st.write("يسعدنا مساهمتك في تطوير قاعدة البيانات. يرجى ملء النموذج أدناه وسيتم مراجعة طلبك من قبل الإدارة.")
+    st.write("يسعدنا مساهمتك في تطوير قاعدة البيانات. يرجى ملء النموذج أدناه وسيتم مراجعة طلبك من قبل المسئول.")
     
     with st.form("request_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
@@ -101,7 +86,7 @@ elif page == "➕ تقديم طلب / اقتراح":
         if req_type in ["إضافة كود جديد", "تعديل اسم كود الحالي"]:
             code_affected = st.text_input("الكود المعني (مثال: CB12345678)")
             
-        details = st.text_area("التفاصيل أو البيان الصحيح المراد إدخاله *")
+        details = st.text_area("التفاصيل أو الاسم الصحيح المراد إدخاله *")
         
         submit_btn = st.form_submit_button("🚀 إرسال الطلب للإدارة")
         
@@ -109,70 +94,80 @@ elif page == "➕ تقديم طلب / اقتراح":
             if not user_name or not user_phone or not details:
                 st.error("⚠️ يرجى ملء الحقول الإلزامية المميزة بعلامة (*)")
             else:
-                # إضافة الطلب إلى قائمة الانتظار
-                new_id = len(st.session_state.pending_requests)
-                st.session_state.pending_requests.append({
-                    "id": new_id,
-                    "name": user_name,
-                    "phone": user_phone,
-                    "type": req_type,
-                    "code": code_affected,
-                    "details": details
-                })
-                st.success("✅ تم إرسال طلبك بنجاح! سيقوم المسؤول بمراجعته وتحديث البيانات في أقرب وقت.")
+                # إدراج الطلب مباشرة في الجدول الجديد entity_suggestions
+                data_to_insert = {
+                    "user_name": user_name.strip(),
+                    "user_phone": user_phone.strip(),
+                    "req_type": req_type,
+                    "code_affected": code_affected.strip() if code_affected else None,
+                    "details": details.strip()
+                }
+                response = supabase.table("entity_suggestions").insert(data_to_insert).execute()
+                
+                if response.data:
+                    st.success("✅ تم إرسال طلبك بنجاح وحفظه في قاعدة البيانات! سيقوم المسؤول بمراجعته قريباً.")
+                else:
+                    st.error("❌ حدث خطأ أثناء إرسال الطلب، يرجى المحاولة مرة أخرى.")
 
 # ----------------------------------------
-# الصفحة الثالثة: لوحة تحكم الأدمن
+# الصفحة الثالثة: لوحة تحكم الأدمن (تحديث تلقائي لجدول entities الفعلي)
 # ----------------------------------------
 elif page == "🔐 لوحة تحكم الأدمن":
-    st.title("🔐 إدارة النظام والموافقات")
+    st.title("🔐 إدارة النظام والموافقات والأكواد")
     
-    # نظام حماية بسيط بكلمة مرور
     admin_password = st.sidebar.text_input("أدخل كلمة مرور الأدمن", type="password")
     
-    # يمكنك تغيير كلمة المرور هنا لما تريد
-    if admin_password == "admin123":
-        st.success("🔓 مرحباً بك يا أدمن. لديك الصلاحية الكاملة الآن.")
+    if admin_password == "admin123": # يمكنك تعديل الباسورد
+        st.success("🔓 مرحباً بك يا أدمن. متصل بقاعدة البيانات بشكل كامل وصلاحيات الإدراج مفعلة.")
         
-        st.subheader("📥 الطلبات المعلقة الحالية:")
+        st.subheader("📥 الطلبات والاقتراحات المعلقة الحالية:")
         
-        if not st.session_state.pending_requests:
-            st.info("لا توجد طلبات معلقة حالياً. عمل ممتاز!")
+        # جلب الطلبات من جدول entity_suggestions
+        requests_response = supabase.table("entity_suggestions").select("*").execute()
+        pending_list = requests_response.data
+        
+        if not pending_list:
+            st.info("لا توجد طلبات معلقة حالياً في قاعدة البيانات.")
         else:
-            # عرض الطلبات في بطاقات (Cards) مع أزرار التحكم
-            for req in list(st.session_state.pending_requests):
-                with st.expander(f"📋 طلب من: {req['name']} | نوع الطلب: {req['type']}", expanded=True):
-                    st.write(f"**رقم الهاتف:** {req['phone']}")
-                    if req['code']:
-                        st.write(f"**الكود المقترح:** `{req['code']}`")
-                    st.write(f"**البيان / التفاصيل:** {req['details']}")
+            for req in pending_list:
+                with st.expander(f"📋 طلب من: {req['user_name']} | نوع الطلب: {req['req_type']}", expanded=True):
+                    st.write(f"**رقم الهاتف:** {req['user_phone']}")
+                    if req['code_affected']:
+                        st.write(f"**الكود المعني:** `{req['code_affected']}`")
+                    st.write(f"**البيان / الاسم المقترح:** {req['details']}")
                     
-                    # أزرار الموافقة والرفض
                     c1, c2, _ = st.columns([1, 1, 4])
                     with c1:
-                        if st.button("✅ موافقة وإضافة", key=f"app_{req['id']}"):
-                            # لو كان طلب إضافة أو تعديل أكواد نقوم بتحديث الـ approved_codes
-                            if req['type'] in ["إضافة كود جديد", "تعديل اسم كود الحالي"] and req['code']:
-                                st.session_state.approved_codes[req['code']] = req['details']
-                                st.success(True)
+                        if st.button("✅ موافقة وتحديث الأكواد المعتمدة", key=f"app_{req['id']}"):
                             
-                            # مسح الطلب من المعلقات بعد الموافقة
-                            st.session_state.pending_requests = [r for r in st.session_state.pending_requests if r['id'] != req['id']]
+                            # إذا كان الطلب إضافة أو تعديل، نقوم بعملية Upsert مباشرة على جدولك الاحترافي entities
+                            if req['req_type'] in ["إضافة كود جديد", "تعديل اسم كود الحالي"] and req['code_affected']:
+                                # الـ upsert سيبحث بالكود؛ إذا وجده سيعدل الاسم (وسيشتغل تريجر الـ log_name_changes_trigger تلقائياً عندك!)
+                                # وإذا لم يجده سيضيف سطراً جديداً
+                                supabase.table("entities").upsert({
+                                    "code": req['code_affected'],
+                                    "name": req['details'],
+                                    "is_active": True
+                                }, on_conflict="code").execute()
+                                st.toast("تم تحديث جدول entities بنجاح واشتغلت تريجرات الحفظ!")
+                            
+                            # حذف الطلب المقترح بعد اعتماده بنجاح
+                            supabase.table("entity_suggestions").delete().eq("id", req["id"]).execute()
                             st.rerun()
                             
                     with c2:
-                        if st.button("❌ رفض الطلب", key=f"rej_{req['id']}", type="danger"):
-                            # مسح الطلب مباشرة
-                            st.session_state.pending_requests = [r for r in st.session_state.pending_requests if r['id'] != req['id']]
-                            st.error("تم رفض وحذف الطلب.")
+                        if st.button("❌ رفض وحذف الاقتراح", key=f"rej_{req['id']}", type="danger"):
+                            # حذف الطلب مباشرة من جدول المقترحات
+                            supabase.table("entity_suggestions").delete().eq("id", req["id"]).execute()
                             st.rerun()
                             
-        # عرض إحصائية سريعة لقاعدة البيانات الحالية للأدمن
         st.divider()
-        st.subheader("📊 قاعدة البيانات المعتمدة الحالية:")
-        st.json(st.session_state.approved_codes)
-        
+        st.subheader("📊 معاينة سريعة لآخر 5 جهات تم تحديثها في جدولك الفعلي (entities):")
+        total_response = supabase.table("entities").select("code, name, updated_at").order("updated_at", desc=True).limit(5).execute()
+        if total_response.data:
+            st.dataframe(pd.DataFrame(total_response.data), use_container_width=True)
+
     elif admin_password != "":
         st.error("❌ كلمة المرور خاطئة! يرجى المحاولة مرة أخرى.")
     else:
-        st.info("💡 يرجى إدخال كلمة مرور الأدمن في القائمة الجانبية لتتمكن من رؤية وإدارة الطلبات.")
+        st.info("💡 يرجى إدخال كلمة مرور الأدمن في القائمة الجانبية لتتمكن من التحكم وتحديث الأكواد.")
