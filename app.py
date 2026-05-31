@@ -114,9 +114,11 @@ elif page == "➕ تقديم طلب / اقتراح":
                     st.error("❌ حدث خطأ أثناء إرسال الطلب، يرجى المحاولة مرة أخرى.")
 
 # ----------------------------------------
-# الصفحة الثالثة: لوحة تحكم الأدمن التلقائية المستقرة والمحمية بنظام الـ Callbacks
+# الصفحة الثالثة: لوحة تحكم الأدمن التلقائية المستقرة والمحمية بنظام الـ UUID والـ Callbacks
 # ----------------------------------------
 elif page == "🔐 لوحة تحكم الأدمن":
+    import uuid  # استيراد مكتبة توليد المعرفات الفريدة لحل مشكلة التكرار نهائياً
+    
     st.title("🔐 إدارة النظام والموافقات والأكواد")
     
     # تهيئة حالة تسجيل الدخول في الذاكرة بشكل صحيح إذا لم تكن موجودة مسبقاً
@@ -184,11 +186,9 @@ elif page == "🔐 لوحة تحكم الأدمن":
                 except Exception as e:
                     pass
 
-            # عرض الطلبات باستخدام حلقة تكرارية آمنة تعتمد على الـ Callbacks والـ Keys الفريدة
+            # عرض الطلبات باستخدام حلقة تكرارية آمنة ومحصنة تماماً بالـ UUID
             for idx, req in enumerate(pending_list):
-                # تأمين تصنيع معرف فريد جداً ومستحيل التكرار في الذاكرة لكل عنصر واجهة
                 req_id = req.get('id', idx)
-                unique_key_suffix = f"__id_{req_id}__idx_{idx}__code_{req.get('code_affected', 'none')}"
                 
                 # إنشاء صندوق حاوية منفصل معزول برمجياً تماماً
                 with st.container(border=True):
@@ -201,12 +201,12 @@ elif page == "🔐 لوحة تحكم الأدمن":
                         
                     st.info(f"**البيان / الاسم المقترح:** {req.get('details', '')}")
                     
-                    # إنشاء الأزرار بشكل مباشر مع ربطها بالـ Callbacks وتمرير المعطيات كـ args
+                    # إنشاء الأزرار مع تمرير uuid4 عشوائي فريد ومستحيل التكرار في الـ key
                     c1, c2, _ = st.columns([1, 1, 3])
                     with c1:
                         st.button(
                             "✅ موافقة واعتماد", 
-                            key=f"btn_approve_{unique_key_suffix}", 
+                            key=f"btn_approve_{uuid.uuid4()}", 
                             type="primary",
                             on_click=approve_request,
                             args=(req, req_id)
@@ -214,7 +214,7 @@ elif page == "🔐 لوحة تحكم الأدمن":
                     with c2:
                         st.button(
                             "❌ رفض وحذف", 
-                            key=f"btn_reject_{unique_key_suffix}", 
+                            key=f"btn_reject_{uuid.uuid4()}", 
                             type="danger",
                             on_click=reject_request,
                             args=(req_id,)
