@@ -114,116 +114,49 @@ elif page == "➕ تقديم طلب / اقتراح":
                     st.error("❌ حدث خطأ أثناء إرسال الطلب، يرجى المحاولة مرة أخرى.")
 
 # ----------------------------------------
-# الصفحة الثالثة: لوحة تحكم الأدمن التلقائية المستقرة والمحمية بنظام الـ UUID والـ Callbacks
+# الصفحة الثالثة: لوحة تحكم الأدمن (نظام الـ Fragments المطور)
 # ----------------------------------------
 elif page == "🔐 لوحة تحكم الأدمن":
-    import uuid  # استيراد مكتبة توليد المعرفات الفريدة لحل مشكلة التكرار نهائياً
-    
     st.title("🔐 إدارة النظام والموافقات والأكواد")
-    
-    # تهيئة حالة تسجيل الدخول في الذاكرة بشكل صحيح إذا لم تكن موجودة مسبقاً
+
+    # تهيئة الجلسة
     if "admin_logged_in" not in st.session_state:
         st.session_state["admin_logged_in"] = False
 
-    # إذا لم يكن الأدمن مسجلاً دخوله، نعرض حقل كلمة المرور
     if not st.session_state["admin_logged_in"]:
-        admin_password = st.sidebar.text_input("أدخل كلمة مرور الأدمن", type="password")
-        if admin_password == "admin123": # يمكنك تعديل الباسورد هنا
+        password = st.sidebar.text_input("كلمة المرور", type="password")
+        if password == "admin123":
             st.session_state["admin_logged_in"] = True
             st.rerun()
-        elif admin_password != "":
-            st.sidebar.error("❌ كلمة المرور خاطئة!")
-    
-    # عرض اللوحة فقط إذا كان الأدمن مسجل الدخول بنجاح في الذاكرة
-    if st.session_state["admin_logged_in"]:
-        st.success("🔓 مرحباً بك يا أدمن. متصل بقاعدة البيانات بشكل كامل وصلاحيات الإدراج مفعلة.")
-        
-        # خيار لتسجيل الخروج من لوحة التحكم في القائمة الجانبية
-        if st.sidebar.button("🔒 تسجيل الخروج من لوحة الأدمن"):
-            st.session_state["admin_logged_in"] = False
-            st.rerun()
-            
-        st.subheader("📥 الطلبات والاقتراحات المعلقة الحالية:")
-        
-        # جلب الطلبات من جدول entity_suggestions
-        requests_response = supabase.table("entity_suggestions").select("*").execute()
-        pending_list = requests_response.data
-        
-        if not pending_list:
-            st.info("لا توجد طلبات معلقة حالياً في قاعدة البيانات.")
-        else:
-            # دالة مستقلة للموافقة والاعتماد (تم نقلها خارج الواجهة لضمان الاستقرار)
-            def approve_request(req_data, record_id):
-                try:
-                    if req_data.get('req_type') in ["إضافة كود جديد", "تعديل اسم كود الحالي"] and req_data.get('code_affected'):
-                        # تحديد الفئة التقريبية للكود الجديد لتصنيفه تلقائياً
-                        code_prefix = str(req_data['code_affected'])[:2].upper()
-                        category_map = {
-                            "CB": "بنوك", "FB": "بنوك", "IB": "بنوك", 
-                            "MF": "تمويل متناهي الصغر", "LF": "تأجير تمويلي", 
-                            "FS": "تخصيم", "MG": "تمويل عقاري وإسكان", 
-                            "HS": "تمويل عقاري وإسكان", "RC": "تمويل استهلاكي / شركات تجارية"
-                        }
-                        determined_cat = category_map.get(code_prefix, "أخرى")
-
-                        # تحديث البيانات في جدول الأكواد الرئيسي
-                        supabase.table("entities").upsert({
-                            "code": req_data['code_affected'].strip(),
-                            "name": req_data['details'].strip(),
-                            "category": determined_cat,
-                            "is_active": True
-                        }, on_conflict="code").execute()
-                    
-                    # حذف الطلب من جدول الاقتراحات بعد اعتماده
-                    supabase.table("entity_suggestions").delete().eq("id", record_id).execute()
-                except Exception as e:
-                    pass
-
-            # دالة مستقلة للرفض والحذف
-            def reject_request(record_id):
-                try:
-                    supabase.table("entity_suggestions").delete().eq("id", record_id).execute()
-                except Exception as e:
-                    pass
-
-            # عرض الطلبات باستخدام حلقة تكرارية آمنة ومحصنة تماماً بالـ UUID
-            for idx, req in enumerate(pending_list):
-                req_id = req.get('id', idx)
-                
-                # إنشاء صندوق حاوية منفصل معزول برمجياً تماماً
-                with st.container(border=True):
-                    st.markdown(f"### 📋 طلب من: **{req.get('user_name', 'مجهول')}**")
-                    st.write(f"**نوع الطلب:** {req.get('req_type', 'عام')}")
-                    st.write(f"**رقم الهاتف:** {req.get('user_phone', 'غير مسجل')}")
-                    
-                    if req.get('code_affected'):
-                        st.write(f"**الكود المعني:** `{req['code_affected']}`")
-                        
-                    st.info(f"**البيان / الاسم المقترح:** {req.get('details', '')}")
-                    
-                    # إنشاء الأزرار مع تمرير uuid4 عشوائي فريد ومستحيل التكرار في الـ key
-                    c1, c2, _ = st.columns([1, 1, 3])
-                    with c1:
-                        st.button(
-                            "✅ موافقة واعتماد", 
-                            key=f"btn_approve_{uuid.uuid4()}", 
-                            type="primary",
-                            on_click=approve_request,
-                            args=(req, req_id)
-                        )
-                    with c2:
-                        st.button(
-                            "❌ رفض وحذف", 
-                            key=f"btn_reject_{uuid.uuid4()}", 
-                            type="danger",
-                            on_click=reject_request,
-                            args=(req_id,)
-                        )
-                            
-        st.divider()
-        st.subheader("📊 معاينة سريعة لآخر 5 جهات تم تحديثها في جدولك الفعلي (entities):")
-        total_response = supabase.table("entities").select("code, name, updated_at").order("updated_at", desc=True).limit(5).execute()
-        if total_response.data:
-            st.dataframe(pd.DataFrame(total_response.data), use_container_width=True)
     else:
-        st.info("💡 يرجى إدخال كلمة مرور الأدمن في القائمة الجانبية لتتمكن من التحكم وتحديث الأكواد.")
+        # استخدام st.fragment لعزل الطلبات عن بقية الصفحة ومنع تداخل الـ Keys
+        @st.fragment
+        def render_request(req):
+            with st.container(border=True):
+                st.write(f"📋 **الطلب:** {req['req_type']} | **الكود:** `{req.get('code_affected', 'N/A')}`")
+                st.write(f"👤 {req['user_name']} - 📱 {req['user_phone']}")
+                st.info(f"البيان: {req['details']}")
+                
+                col1, col2 = st.columns(2)
+                
+                if col1.button("✅ موافقة", key=f"app_{req['id']}"):
+                    # 1. تحديث الجدول الأساسي
+                    if req['code_affected']:
+                        supabase.table("entities").update({"name": req['details']}).eq("code", req['code_affected']).execute()
+                    
+                    # 2. حذف الطلب
+                    supabase.table("entity_suggestions").delete().eq("id", req['id']).execute()
+                    st.rerun()
+                    
+                if col2.button("❌ رفض", key=f"rej_{req['id']}"):
+                    supabase.table("entity_suggestions").delete().eq("id", req['id']).execute()
+                    st.rerun()
+
+        st.subheader("📥 الطلبات المعلقة:")
+        response = supabase.table("entity_suggestions").select("*").execute()
+        
+        if not response.data:
+            st.info("لا توجد طلبات.")
+        else:
+            for req in response.data:
+                render_request(req)
