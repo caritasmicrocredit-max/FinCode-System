@@ -11,6 +11,10 @@ URL = st.secrets["SUPABASE_URL"]
 KEY = st.secrets["SUPABASE_KEY"]
 supabase = create_client(URL, KEY)
 
+# تهيئة حالة تسجيل الدخول للأدمن في الذاكرة لتجنب الخروج التلقائي
+if "admin_logged_in" not in st.session_state:
+    st.session_state["admin_logged_in"] = False
+
 # القائمة الجانبية للتنقل
 st.sidebar.title("🧭 القائمة الرئيسية")
 page = st.sidebar.radio("انتقل إلى:", ["🔎 البحث والاستبدال", "➕ تقديم طلب / اقتراح", "🔐 لوحة تحكم الأدمن"])
@@ -31,7 +35,7 @@ if page == "🔎 البحث والاستبدال":
         if st.button("🔄 استبدال بالأسماء", type="primary"):
             if codes_input.strip():
                 # تقسيم المدخلات بناء على الأسطر أو الفواصل وتنظيفها
-                input_codes = [c.strip() for c in re.split(r'[\s,،\n]+', codes_input.strip()) if c.strip()]
+                input_codes = [c.strip() for c in re.split(r'[\s, Gram,،\n]+', codes_input.strip()) if c.strip()]
                 
                 if input_codes:
                     # جلب الأكواد من جدولك الفعلي entities (فقط الحسابات النشطة)
@@ -110,16 +114,29 @@ elif page == "➕ تقديم طلب / اقتراح":
                     st.error("❌ حدث خطأ أثناء إرسال الطلب، يرجى المحاولة مرة أخرى.")
 
 # ----------------------------------------
-# الصفحة الثالثة: لوحة تحكم الأدمن (تحديث تلقائي لجدول entities الفعلي)
+# الصفحة الثالثة: لوحة تحكم الأدمن التلقائية والمستقرة
 # ----------------------------------------
 elif page == "🔐 لوحة تحكم الأدمن":
     st.title("🔐 إدارة النظام والموافقات والأكواد")
     
-    admin_password = st.sidebar.text_input("أدخل كلمة مرور الأدمن", type="password")
+    # التحقق من حالة الدخول السابقة أو استقبال كلمة مرور جديدة
+    if not st.session_state["admin_logged_in"]:
+        admin_password = st.sidebar.text_input("أدخل كلمة مرور الأدمن", type="password")
+        if admin_password == "admin123": # يمكنك تعديل الباسورد هنا
+            st.session_state["admin_logged_in"] = True
+            st.rerun()
+        elif admin_password != "":
+            st.sidebar.error("❌ كلمة المرور خاطئة!")
     
-    if admin_password == "admin123": # يمكنك تعديل الباسورد
+    # عرض اللوحة فقط إذا كان الأدمن مسجل الدخول في الذاكرة
+    if st.session_state["admin_logged_in"]:
         st.success("🔓 مرحباً بك يا أدمن. متصل بقاعدة البيانات بشكل كامل وصلاحيات الإدراج مفعلة.")
         
+        # خيار لتسجيل الخروج من لوحة التحكم في القائمة الجانبية
+        if st.sidebar.button("🔒 تسجيل الخروج من لوحة الأدمن"):
+            st.session_state["admin_logged_in"] = False
+            st.rerun()
+            
         st.subheader("📥 الطلبات والاقتراحات المعلقة الحالية:")
         
         # جلب الطلبات من جدول entity_suggestions
@@ -142,23 +159,28 @@ elif page == "🔐 لوحة تحكم الأدمن":
                             
                             # إذا كان الطلب إضافة أو تعديل، نقوم بعملية Upsert مباشرة على جدولك الاحترافي entities
                             if req['req_type'] in ["إضافة كود جديد", "تعديل اسم كود الحالي"] and req['code_affected']:
-                                # الـ upsert سيبحث بالكود؛ إذا وجده سيعدل الاسم (وسيشتغل تريجر الـ log_name_changes_trigger تلقائياً عندك!)
-                                # وإذا لم يجده سيضيف سطراً جديداً
+                                # تحديد الفئة التقريبية للكود الجديد لتصنيفه بجدولك تلقائياً
+                                code_prefix = req['code_affected'][:2].upper()
+                                category_map = {"CB": "بنوك", "FB": "بنوك", "IB": "بنوك", "MF": "تمويل متناهي الصغر", "LF": "تأجير تمويلي", "FS": "تخصيم", "MG": "تمويل عقاري وإسكان", "HS": "تمويل عقاري وإسكان", "RC": "تمويل استهلاكي / شركات تجارية"}
+                                determined_cat = category_map.get(code_prefix, "أخرى")
+
                                 supabase.table("entities").upsert({
-                                    "code": req['code_affected'],
-                                    "name": req['details'],
+                                    "code": req['code_affected'].strip(),
+                                    "name": req['details'].strip(),
+                                    "category": determined_cat,
                                     "is_active": True
                                 }, on_conflict="code").execute()
-                                st.toast("تم تحديث جدول entities بنجاح واشتغلت تريجرات الحفظ!")
                             
                             # حذف الطلب المقترح بعد اعتماده بنجاح
                             supabase.table("entity_suggestions").delete().eq("id", req["id"]).execute()
+                            st.toast("✅ تم اعتماد الكود بنجاح وحذفه من قائمة الانتظار!")
                             st.rerun()
                             
                     with c2:
                         if st.button("❌ رفض وحذف الاقتراح", key=f"rej_{req['id']}", type="danger"):
                             # حذف الطلب مباشرة من جدول المقترحات
                             supabase.table("entity_suggestions").delete().eq("id", req["id"]).execute()
+                            st.toast("❌ تم رفض الطلب وحذفه.")
                             st.rerun()
                             
         st.divider()
@@ -166,8 +188,5 @@ elif page == "🔐 لوحة تحكم الأدمن":
         total_response = supabase.table("entities").select("code, name, updated_at").order("updated_at", desc=True).limit(5).execute()
         if total_response.data:
             st.dataframe(pd.DataFrame(total_response.data), use_container_width=True)
-
-    elif admin_password != "":
-        st.error("❌ كلمة المرور خاطئة! يرجى المحاولة مرة أخرى.")
     else:
         st.info("💡 يرجى إدخال كلمة مرور الأدمن في القائمة الجانبية لتتمكن من التحكم وتحديث الأكواد.")
