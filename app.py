@@ -114,7 +114,7 @@ elif page == "➕ تقديم طلب / اقتراح":
                     st.error("❌ حدث خطأ أثناء إرسال الطلب، يرجى المحاولة مرة أخرى.")
 
 # ----------------------------------------
-# الصفحة الثالثة: لوحة تحكم الأدمن التلقائية والمستقرة والمحمية
+# الصفحة الثالثة: لوحة تحكم الأدمن التلقائية المستقرة والمحمية تماماً ضد التداخل
 # ----------------------------------------
 elif page == "🔐 لوحة تحكم الأدمن":
     st.title("🔐 إدارة النظام والموافقات والأكواد")
@@ -146,29 +146,44 @@ elif page == "🔐 لوحة تحكم الأدمن":
         if not pending_list:
             st.info("لا توجد طلبات معلقة حالياً في قاعدة البيانات.")
         else:
-            # استخدام enumerate لضمان وجود مؤشر عددي فريد (idx) يمنع خطأ StreamlitAPIException تماماً
+            # استخدام enumerate لضمان وجود مؤشر عددي فريد
             for idx, req in enumerate(pending_list):
-                # تأمين الحصول على معرف حتى لو كان فارغاً في قاعدة البيانات
                 req_id = req.get('id', idx)
-                req_code = req.get('code_affected', 'NO_CODE') or f'custom_{idx}'
+                req_code = req.get('code_affected', 'NO_CODE') or f'none_{idx}'
                 
-                with st.expander(f"📋 طلب من: {req.get('user_name', 'مجهول')} | نوع الطلب: {req.get('req_type', 'عام')}", expanded=True):
+                # إنشاء حاوية صندوق (Container) منفصلة تماماً لكل طلب لعزل الأزرار في الذاكرة
+                with st.container(border=True):
+                    st.markdown(f"### 📋 طلب من: **{req.get('user_name', 'مجهول')}**")
+                    st.write(f"**نوع الطلب:** {req.get('req_type', 'عام')}")
                     st.write(f"**رقم الهاتف:** {req.get('user_phone', 'غير مسجل')}")
+                    
                     if req.get('code_affected'):
                         st.write(f"**الكود المعني:** `{req['code_affected']}`")
-                    st.write(f"**البيان / الاسم المقترح:** {req.get('details', '')}")
+                        
+                    st.info(f"**البيان / الاسم المقترح:** {req.get('details', '')}")
                     
-                    c1, c2, _ = st.columns([1, 1, 4])
-                    with c1:
-                        # دمج الـ ID مع الـ Index لضمان مفتاح فريد 100%
-                        if st.button("✅ موافقة وتحديث الأكواد", key=f"app_{req_id}_{req_code}_{idx}"):
+                    # وضع الأزرار داخل استمارة مصغرة (Form) يمنع Streamlit من عمل Rerun عشوائي متداخل
+                    with st.form(key=f"form_admin_{req_id}_{idx}"):
+                        c1, c2, _ = st.columns([1, 1, 3])
+                        with c1:
+                            btn_approve = st.form_submit_button("✅ موافقة واعتماد")
+                        with c2:
+                            btn_reject = st.form_submit_button("❌ رفض وحذف", type="danger")
                             
+                        # تنفيذ العمليات بناءً على الزر المضغوط داخل الـ Form الآمن
+                        if btn_approve:
                             if req.get('req_type') in ["إضافة كود جديد", "تعديل اسم كود الحالي"] and req.get('code_affected'):
-                                # تحديد الفئة التقريبية للكود الجديد لتصنيفه بجدولك تلقائياً
-                                code_prefix = req['code_affected'][:2].upper()
-                                category_map = {"CB": "بنوك", "FB": "بنوك", "IB": "بنوك", "MF": "تمويل متناهي الصغر", "LF": "تأجير تمويلي", "FS": "تخصيم", "MG": "تمويل عقاري وإسكان", "HS": "تمويل عقاري وإسكان", "RC": "تمويل استهلاكي / شركات تجارية"}
+                                # تحديد الفئة التقريبية للكود الجديد لتصنيفه تلقائياً
+                                code_prefix = str(req['code_affected'])[:2].upper()
+                                category_map = {
+                                    "CB": "بنوك", "FB": "بنوك", "IB": "بنوك", 
+                                    "MF": "تمويل متناهي الصغر", "LF": "تأجير تمويلي", 
+                                    "FS": "تخصيم", "MG": "تمويل عقاري وإسكان", 
+                                    "HS": "تمويل عقاري وإسكان", "RC": "تمويل استهلاكي / شركات تجارية"
+                                }
                                 determined_cat = category_map.get(code_prefix, "أخرى")
 
+                                # تحديث البيانات في جدول الأكواد الرئيسي
                                 supabase.table("entities").upsert({
                                     "code": req['code_affected'].strip(),
                                     "name": req['details'].strip(),
@@ -176,17 +191,15 @@ elif page == "🔐 لوحة تحكم الأدمن":
                                     "is_active": True
                                 }, on_conflict="code").execute()
                             
-                            # حذف الطلب المقترح بعد اعتماده بنجاح
+                            # حذف الطلب من جدول الاقتراحات
                             supabase.table("entity_suggestions").delete().eq("id", req_id).execute()
-                            st.toast("✅ تم اعتماد الكود بنجاح!")
+                            # إعادة تحديث الصفحة بشكل نظيف ومستقر بدون تداخل
                             st.rerun()
                             
-                    with c2:
-                        # دمج الـ ID مع الـ Index لضمان مفتاح فريد 100% لزر الرفض
-                        if st.button("❌ رفض وحذف الاقتراح", key=f"rej_{req_id}_{req_code}_{idx}", type="danger"):
-                            # حذف الطلب مباشرة من جدول المقترحات
+                        if btn_reject:
+                            # حذف الطلب مباشرة عند الرفض
                             supabase.table("entity_suggestions").delete().eq("id", req_id).execute()
-                            st.toast("❌ تم رفض الطلب وحذفه.")
+                            # إعادة تحديث الصفحة بشكل نظيف ومستقر بدون تداخل
                             st.rerun()
                             
         st.divider()
