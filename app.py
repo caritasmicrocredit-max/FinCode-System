@@ -339,6 +339,10 @@ if "admin_logged_in" not in st.session_state:
     st.session_state["admin_logged_in"] = False
 if "page" not in st.session_state:
     st.session_state["page"] = "search"
+if "search_q" not in st.session_state:
+    st.session_state["search_q"] = ""
+if "admin_search" not in st.session_state:
+    st.session_state["admin_search"] = ""
 
 # ===================== NAV =====================
 pages = {
@@ -378,10 +382,20 @@ if page == "search":
     </div>
     """, unsafe_allow_html=True)
 
+    def do_search():
+        pass  # triggers rerun on every keystroke
+
     with st.container():
         st.markdown('<div class="search-wrap">', unsafe_allow_html=True)
-        query = st.text_input("", placeholder="🔍  اكتب كود أو اسم جهة...", label_visibility="collapsed", key="search_q")
+        st.text_input(
+            "", placeholder="🔍  اكتب كود أو اسم جهة...",
+            label_visibility="collapsed",
+            key="search_q",
+            on_change=do_search
+        )
         st.markdown('</div>', unsafe_allow_html=True)
+
+    query = st.session_state["search_q"]
 
     if query:
         response = supabase.table("entities").select(
@@ -535,7 +549,7 @@ elif page == "admin":
                 else:
                     st.error("كلمة مرور غير صحيحة")
     else:
-        tab_req, tab_entities = st.tabs(["📥  الطلبات المعلقة", "📋  إدارة الأكواد"])
+        tab_req, tab_entities, tab_quickadd = st.tabs(["📥  الطلبات المعلقة", "📋  إدارة الأكواد", "⚡  إدخال سريع"])
 
         # ---- TAB 1: Pending requests ----
         with tab_req:
@@ -588,7 +602,11 @@ elif page == "admin":
         with tab_entities:
             st.markdown('<p style="color:var(--muted); font-size:14px; margin-bottom:1rem">عرض وتعديل وإضافة جهات في قاعدة البيانات</p>', unsafe_allow_html=True)
 
-            search_admin = st.text_input("بحث سريع", placeholder="كود أو اسم جهة...", key="admin_search")
+            def do_admin_search():
+                pass
+
+            st.text_input("بحث سريع", placeholder="كود أو اسم جهة...", key="admin_search", on_change=do_admin_search)
+            search_admin = st.session_state["admin_search"]
 
             if search_admin:
                 r = supabase.table("entities").select("*").or_(
@@ -631,6 +649,80 @@ elif page == "admin":
                         st.rerun()
                     else:
                         st.error("الكود والاسم مطلوبان")
+
+        # ---- TAB 3: Quick direct entry ----
+        with tab_quickadd:
+            st.markdown('<p style="color:var(--muted); font-size:14px; margin-bottom:1.5rem">أدخل أكواداً جديدة مباشرة واحداً تلو الآخر بدون أي خطوات إضافية.</p>', unsafe_allow_html=True)
+
+            # Initialize quick-add session state
+            if "qa_success" not in st.session_state:
+                st.session_state["qa_success"] = []
+
+            with st.form("quick_add_form", clear_on_submit=True):
+                qa1, qa2 = st.columns(2)
+                with qa1:
+                    qa_code = st.text_input("الكود *", placeholder="CB12345678", key="qa_code_input")
+                with qa2:
+                    qa_name = st.text_input("اسم الجهة *", placeholder="البنك / الشركة...", key="qa_name_input")
+
+                qa3, qa4, qa5 = st.columns(3)
+                with qa3:
+                    qa_cat = st.text_input("التصنيف", placeholder="بنك / شركة تمويل...", key="qa_cat")
+                with qa4:
+                    qa_sub = st.text_input("الفرعي", placeholder="اختياري", key="qa_sub")
+                with qa5:
+                    qa_active = st.selectbox("الحالة", ["نشط", "موقوف"], key="qa_active")
+
+                save_btn = st.form_submit_button("⚡  حفظ وأدخل التالي", type="primary", use_container_width=True)
+
+                if save_btn:
+                    if not qa_code.strip() or not qa_name.strip():
+                        st.error("الكود واسم الجهة مطلوبان")
+                    else:
+                        # Check if code already exists
+                        existing = supabase.table("entities").select("code").eq("code", qa_code.strip()).execute()
+                        if existing.data:
+                            st.warning(f"⚠️ الكود {qa_code.strip()} موجود مسبقاً في قاعدة البيانات")
+                        else:
+                            supabase.table("entities").insert({
+                                "code": qa_code.strip(),
+                                "name": qa_name.strip(),
+                                "category": qa_cat.strip() or None,
+                                "sub_category": qa_sub.strip() or None,
+                                "is_active": qa_active == "نشط"
+                            }).execute()
+                            st.session_state["qa_success"].append(
+                                {"code": qa_code.strip(), "name": qa_name.strip()}
+                            )
+                            st.rerun()
+
+            # Show running log of what was added this session
+            if st.session_state["qa_success"]:
+                count_added = len(st.session_state["qa_success"])
+                st.markdown(f"""
+                <div style="margin-top:1.5rem">
+                  <div style="font-size:13px; font-weight:600; color:var(--sage); margin-bottom:10px">
+                    ✓ تمت إضافة {count_added} كود في هذه الجلسة
+                  </div>
+                  <div style="border:1px solid var(--border); border-radius:12px; overflow:hidden;">""",
+                unsafe_allow_html=True)
+
+                for item in reversed(st.session_state["qa_success"]):
+                    st.markdown(f"""
+                    <div style="display:flex; align-items:center; gap:12px; padding:10px 16px;
+                      border-bottom:1px solid var(--border); font-size:14px;">
+                      <span style="background:var(--sage-lt); color:var(--sage); font-size:12px;
+                        font-weight:600; padding:3px 10px; border-radius:6px;
+                        font-family:'IBM Plex Mono',monospace">{item['code']}</span>
+                      <span style="color:var(--ink-2)">{item['name']}</span>
+                      <span style="margin-right:auto; color:var(--success); font-size:12px">✓ تمت الإضافة</span>
+                    </div>""", unsafe_allow_html=True)
+
+                st.markdown("</div></div>", unsafe_allow_html=True)
+
+                if st.button("مسح السجل", key="clear_qa_log"):
+                    st.session_state["qa_success"] = []
+                    st.rerun()
 
         # Logout
         st.markdown("<div style='height:2rem'></div>", unsafe_allow_html=True)
